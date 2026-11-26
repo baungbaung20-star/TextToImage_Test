@@ -1,6 +1,6 @@
 name: Build Android APK
 
-# GitHub ရဲ့ Actions tab > "Build Android APK" > Run workflow နှိပ်ရင် APK ထွက်ပါမယ်။
+# Actions tab > "Build Android APK" > Run workflow
 on:
   workflow_dispatch:
 
@@ -11,6 +11,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -55,48 +56,11 @@ jobs:
           echo -n "${V}.stable" > android/.build_version
           touch android/build/.gdignore
 
-      - name: Add the plugin to the template
-        run: |
-          echo "== template layout =="
-          find android/build -maxdepth 3 -not -path '*/.*' | sort | head -80
+      - name: Build stable-diffusion.cpp server for Android (arm64)
+        run: bash ci/build_sd_server.sh
 
-          # 1) AndroidManifest that holds the <application> element
-          MANIFEST=$(grep -rl --include=AndroidManifest.xml "</application>" android/build | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)
-          [ -n "$MANIFEST" ] || { echo "ERROR: no AndroidManifest.xml with </application>"; exit 1; }
-          echo "manifest: $MANIFEST"
-          MDIR=$(dirname "$MANIFEST")
-
-          # 2) Source root = the folder that contains com/godot/game/GodotApp.*
-          APP=$(find android/build -path '*/com/godot/game/GodotApp.*' | head -1)
-          if [ -n "$APP" ]; then
-            SRCROOT=${APP%/com/godot/game/*}
-          elif [ "$(basename "$MDIR")" = "main" ]; then
-            SRCROOT="$MDIR/java"
-          else
-            SRCROOT="$MDIR/src/main/java"
-          fi
-          echo "source root: $SRCROOT"
-          mkdir -p "$SRCROOT/com/example/imagegen"
-          cp ImageGenPlugin.kt "$SRCROOT/com/example/imagegen/ImageGenPlugin.kt"
-
-          # 3) Register the plugin in the manifest
-          if ! grep -q "OnDeviceImageGen" "$MANIFEST"; then
-            sed -i 's#</application>#    <meta-data android:name="org.godotengine.plugin.v2.OnDeviceImageGen" android:value="com.example.imagegen.ImageGenPlugin" />\n        <uses-native-library android:name="libOpenCL.so" android:required="false" />\n    </application>#' "$MANIFEST"
-          fi
-          grep -n "OnDeviceImageGen" "$MANIFEST"
-
-          # 4) MediaPipe dependency in the app module's gradle file
-          echo "== gradle files =="
-          find android/build -maxdepth 3 \( -name build.gradle -o -name build.gradle.kts \) -not -path '*/build/build/*'
-          GRADLE=$(grep -rlE "com\.android\.application|android\.application" android/build --include=build.gradle --include=build.gradle.kts | awk '{print length, $0}' | sort -n | head -1 | cut -d' ' -f2-)
-          [ -n "$GRADLE" ] || GRADLE=android/build/build.gradle
-          echo "app gradle: $GRADLE"
-          grep -qi kotlin "$GRADLE" || echo "WARNING: kotlin plugin not found in $GRADLE"
-          if ! grep -q "tasks-vision-image-generator" "$GRADLE"; then
-            sed -i '0,/^dependencies[[:space:]]*{/s//dependencies {\n    implementation "com.google.mediapipe:tasks-vision-image-generator:latest.release"/' "$GRADLE"
-          fi
-          grep -n "tasks-vision-image-generator" "$GRADLE" || { echo "ERROR: dependency not inserted"; head -60 "$GRADLE"; exit 1; }
-          echo "patched OK"
+      - name: Add plugin and server binary to the template
+        run: bash ci/patch_template.sh
 
       - name: Debug keystore
         run: |
@@ -145,8 +109,10 @@ jobs:
         run: |
           # Android export needs ETC2/ASTC texture import enabled
           grep -q "import_etc2_astc" project.godot || sed -i '/^\[rendering\]/a textures/vram_compression/import_etc2_astc=true' project.godot
-          cat project.godot
           godot --headless --import || true
+
+      - name: Check GDScript for errors
+        run: godot --headless --check-only --script res://main.gd
 
       - name: Export APK
         env:
