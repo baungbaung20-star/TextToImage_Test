@@ -77,11 +77,8 @@ jobs:
       - name: Add plugin and server binary to the template
         run: bash ci/patch_template.sh
 
-      - name: Debug keystore
-        run: |
-          keytool -genkeypair -v -keystore $HOME/debug.keystore -storepass android -keypass android \
-            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+      - name: Debug keystore (fixed one, so new APKs install over the old app and keep the model)
+        run: cp ci/debug.keystore $HOME/debug.keystore
 
       - name: Godot editor settings and export preset
         run: |
