@@ -56,8 +56,23 @@ jobs:
           echo -n "${V}.stable" > android/.build_version
           touch android/build/.gdignore
 
+      - name: Restore cached sd-server binary
+        id: sdcache
+        uses: actions/cache/restore@v4
+        with:
+          path: native/arm64-v8a
+          key: sdserver-${{ hashFiles('ci/build_sd_server.sh') }}-v1
+
       - name: Build stable-diffusion.cpp server for Android (arm64)
+        if: steps.sdcache.outputs.cache-hit != 'true'
         run: bash ci/build_sd_server.sh
+
+      - name: Save sd-server binary to cache
+        if: steps.sdcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: native/arm64-v8a
+          key: sdserver-${{ hashFiles('ci/build_sd_server.sh') }}-v1
 
       - name: Add plugin and server binary to the template
         run: bash ci/patch_template.sh
